@@ -1,3 +1,5 @@
+// formula-version: v1.3 (2026-04-21)
+
 import { DOOR_DEPTH_OFFSET, NON_STD_COEFF, STD_COEFF } from "./config";
 
 export interface AccurateInput {
@@ -17,35 +19,32 @@ export interface AccurateInput {
   unitPrice: number;
 }
 
-export interface QuickInput {
-  W: number;
-  H: number;
-  projectionUnitPrice: number;
-}
-
-export interface QuotationPart {
+export interface PartRow {
   name: string;
   sizeW: number;
   sizeH: number;
   qty: number;
   areaM2: number;
-  subtotal: number;
   unitPrice: number;
+  subtotal: number;
 }
 
 export interface AccurateResult {
-  cabinetParts: QuotationPart[];
-  doorParts: QuotationPart[];
-  parts: QuotationPart[];
+  cabinetParts: PartRow[];
+  doorParts: PartRow[];
   cabinetAreaM2: number;
   doorAreaM2: number;
-  areaM2: number;
   cabinetCost: number;
   doorCost: number;
-  materialCost: number;
   coeff: number;
   hardwareFee: number;
   finalPrice: number;
+}
+
+export interface QuickInput {
+  W: number;
+  H: number;
+  projectionUnitPrice: number;
 }
 
 export interface QuickResult {
@@ -53,32 +52,15 @@ export interface QuickResult {
   projectionEstimate: number;
 }
 
-export interface QuotationInput {
-  W: number;
-  D: number;
-  H: number;
-  boardThickness?: number;
-  shelfHCount: number;
-  shelfVCount: number;
-  hasDoor: boolean;
-  doorW?: number;
-  doorH?: number;
-  doorCount?: number;
-  doorUnitPrice?: number;
-  isNonStd: boolean;
-  hardwareFee: number;
-  unitPrice: number;
-}
+export type QuotationPart = PartRow;
 
-export type QuotationResult = AccurateResult;
-
-const createPart = (
+const createPartRow = (
   name: string,
   sizeW: number,
   sizeH: number,
   qty: number,
   unitPrice: number,
-): QuotationPart | null => {
+): PartRow | null => {
   if (qty === 0) {
     return null;
   }
@@ -91,69 +73,69 @@ const createPart = (
     sizeH,
     qty,
     areaM2,
-    subtotal: areaM2 * unitPrice,
     unitPrice,
+    subtotal: areaM2 * unitPrice,
   };
 };
 
-const isPart = (part: QuotationPart | null): part is QuotationPart => part !== null;
+const isPartRow = (part: PartRow | null): part is PartRow => part !== null;
 
 export function calculateAccurate(input: AccurateInput): AccurateResult {
   const t = input.boardThickness;
-  const compensatedD = input.hasDoor ? input.D - DOOR_DEPTH_OFFSET : input.D;
+  const D0 = input.hasDoor ? input.D - DOOR_DEPTH_OFFSET : input.D;
 
-  const sideW = compensatedD;
-  const sideH = input.H;
-  const topBottomW = input.W - 2 * t;
-  const topBottomH = compensatedD - t;
-  const backW = input.W - 2 * t;
-  const backH = input.H;
-  const shelfHW = input.W - 2 * t;
-  const shelfHH = compensatedD - t;
-  const shelfVW = compensatedD - t;
-  const shelfVH = input.H - 2 * t;
+  const area_side = D0 * input.H * 2;
+  const area_top_bottom = (input.W - 2 * t) * (D0 - t) * 2;
+  const area_back = (input.W - 2 * t) * input.H;
+  const area_shelf_h = (input.W - 2 * t) * (D0 - t) * input.shelfHCount;
+  const area_shelf_v = (D0 - t) * (input.H - 2 * t) * input.shelfVCount;
 
-  const areaSide = sideW * sideH * 2;
-  const areaTopBottom = topBottomW * topBottomH * 2;
-  const areaBack = backW * backH;
-  const areaShelfH = shelfHW * shelfHH * input.shelfHCount;
-  const areaShelfV = shelfVW * shelfVH * input.shelfVCount;
-  const areaCabinetMm2 = areaSide + areaTopBottom + areaBack + areaShelfH + areaShelfV;
-  const cabinetAreaM2 = areaCabinetMm2 / 1_000_000;
-
-  const resolvedDoorW = input.doorW ?? 0;
-  const resolvedDoorH = input.doorH ?? 0;
-  const resolvedDoorCount = input.doorCount ?? 0;
-  const resolvedDoorUnitPrice = input.doorUnitPrice ?? 0;
-  const areaDoorMm2 = input.hasDoor ? resolvedDoorW * resolvedDoorH * resolvedDoorCount : 0;
-  const doorAreaM2 = areaDoorMm2 / 1_000_000;
-
+  const cabinet_mm2 =
+    area_side + area_top_bottom + area_back + area_shelf_h + area_shelf_v;
+  const cabinetAreaM2 = cabinet_mm2 / 1_000_000;
   const cabinetCost = cabinetAreaM2 * input.unitPrice;
-  const doorCost = doorAreaM2 * resolvedDoorUnitPrice;
+
+  let doorAreaM2 = 0;
+  let doorCost = 0;
+
+  if (input.hasDoor) {
+    const door_mm2 = input.doorW! * input.doorH! * input.doorCount!;
+    doorAreaM2 = door_mm2 / 1_000_000;
+    doorCost = doorAreaM2 * input.doorUnitPrice!;
+  }
+
   const coeff = input.isNonStd ? NON_STD_COEFF : STD_COEFF;
   const finalPrice = (cabinetCost + doorCost) * coeff + input.hardwareFee;
 
   const cabinetParts = [
-    createPart("侧板", sideW, sideH, 2, input.unitPrice),
-    createPart("顶底板", topBottomW, topBottomH, 2, input.unitPrice),
-    createPart("背板", backW, backH, 1, input.unitPrice),
-    createPart("横层板", shelfHW, shelfHH, input.shelfHCount, input.unitPrice),
-    createPart("中竖板", shelfVW, shelfVH, input.shelfVCount, input.unitPrice),
-  ].filter(isPart);
+    createPartRow("侧板", D0, input.H, 2, input.unitPrice),
+    createPartRow("顶底板", input.W - 2 * t, D0 - t, 2, input.unitPrice),
+    createPartRow("背板", input.W - 2 * t, input.H, 1, input.unitPrice),
+    createPartRow("横层板", input.W - 2 * t, D0 - t, input.shelfHCount, input.unitPrice),
+    createPartRow("中竖板", D0 - t, input.H - 2 * t, input.shelfVCount, input.unitPrice),
+  ].filter(isPartRow);
+
   const doorParts = input.hasDoor
-    ? [createPart("门板", resolvedDoorW, resolvedDoorH, resolvedDoorCount, resolvedDoorUnitPrice)].filter(isPart)
+    ? [
+        {
+          name: "门板",
+          sizeW: input.doorW!,
+          sizeH: input.doorH!,
+          qty: input.doorCount!,
+          areaM2: doorAreaM2,
+          unitPrice: input.doorUnitPrice!,
+          subtotal: doorCost,
+        },
+      ]
     : [];
 
   return {
     cabinetParts,
     doorParts,
-    parts: [...cabinetParts, ...doorParts],
     cabinetAreaM2,
     doorAreaM2,
-    areaM2: cabinetAreaM2 + doorAreaM2,
     cabinetCost,
     doorCost,
-    materialCost: cabinetCost + doorCost,
     coeff,
     hardwareFee: input.hardwareFee,
     finalPrice,
@@ -168,17 +150,4 @@ export function calculateQuick(input: QuickInput): QuickResult {
     projectionAreaM2,
     projectionEstimate,
   };
-}
-
-export function calculateQuotation(input: QuotationInput): QuotationResult {
-  const accurateInput: AccurateInput = {
-    ...input,
-    boardThickness: input.boardThickness ?? 18,
-    doorCount: input.doorCount ?? 1,
-    doorH: input.doorH ?? input.H,
-    doorUnitPrice: input.doorUnitPrice ?? input.unitPrice,
-    doorW: input.doorW ?? input.W,
-  };
-
-  return calculateAccurate(accurateInput);
 }
